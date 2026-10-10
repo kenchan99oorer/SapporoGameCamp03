@@ -45,15 +45,15 @@ public class OrbitCameraController : MonoBehaviour
     [Tooltip("Default seconds for a target slide. 0 snaps instantly.")]
     [SerializeField, Min(0.0f)] private float slideDuration = 0.5f;
 
-#if ENABLE_INPUT_SYSTEM
-    [Header("Input (Input System)")]
-    [SerializeField] private Key rotateLeftKey = Key.LeftArrow;
-    [SerializeField] private Key rotateRightKey = Key.RightArrow;
-#else
-    [Header("Input (Legacy)")]
-    [SerializeField] private KeyCode rotateLeftKey = KeyCode.LeftArrow;
-    [SerializeField] private KeyCode rotateRightKey = KeyCode.RightArrow;
-#endif
+//#if ENABLE_INPUT_SYSTEM
+//    [Header("Input (Input System)")]
+//    [SerializeField] private Key rotateLeftKey = Key.LeftArrow;
+//    [SerializeField] private Key rotateRightKey = Key.RightArrow;
+//#else
+//    [Header("Input (Legacy)")]
+//    [SerializeField] private KeyCode rotateLeftKey = KeyCode.LeftArrow;
+//    [SerializeField] private KeyCode rotateRightKey = KeyCode.RightArrow;
+//#endif
 
     /// <summary>Raised when a target slide reaches its destination.</summary>
     public event Action<Vector3> TargetSlideCompleted;
@@ -78,6 +78,21 @@ public class OrbitCameraController : MonoBehaviour
     public bool IsRotating => rotating;
     public bool IsSliding => sliding;
     public Vector3 CurrentTarget => currentTarget;
+
+    /// <summary>Yaw the camera is currently at (interpolated during a rotation).</summary>
+    public float CurrentYaw => currentYaw;
+
+    /// <summary>Yaw the camera is rotating toward. Equals CurrentYaw when settled.</summary>
+    public float TargetYaw => toYaw;
+
+    /// <summary>
+    /// Horizontal (XZ) unit direction from the target toward a camera at the given yaw.
+    /// </summary>
+    public static Vector3 DirectionToCamera(float yaw)
+    {
+        float r = yaw * Mathf.Deg2Rad;
+        return new Vector3(-Mathf.Sin(r), 0.0f, -Mathf.Cos(r));
+    }
 
     public Transform Player
     {
@@ -106,12 +121,6 @@ public class OrbitCameraController : MonoBehaviour
 
     private void Update()
     {
-        int direction = ReadInput();
-        if (direction != 0)
-        {
-            BeginStep(direction);
-        }
-
         bool dirty = TickRotation(Time.unscaledDeltaTime);
         dirty |= TickSlide(Time.unscaledDeltaTime);
 
@@ -253,23 +262,23 @@ public class OrbitCameraController : MonoBehaviour
 
     private static float Smoothstep(float t) => t * t * (3.0f - 2.0f * t);
 
-    private int ReadInput()
-    {
-        int dir = 0;
-#if ENABLE_INPUT_SYSTEM
-        Keyboard kb = Keyboard.current;
-        if (kb == null)
-        {
-            return 0;
-        }
-        if (kb[rotateLeftKey].wasPressedThisFrame) dir -= 1;
-        if (kb[rotateRightKey].wasPressedThisFrame) dir += 1;
-#else
-        if (Input.GetKeyDown(rotateLeftKey))  dir -= 1;
-        if (Input.GetKeyDown(rotateRightKey)) dir += 1;
-#endif
-        return dir;
-    }
+//    private int ReadInput()
+//    {
+//        int dir = 0;
+//#if ENABLE_INPUT_SYSTEM
+//        Keyboard kb = Keyboard.current;
+//        if (kb == null)
+//        {
+//            return 0;
+//        }
+//        if (kb[rotateLeftKey].wasPressedThisFrame) dir -= 1;
+//        if (kb[rotateRightKey].wasPressedThisFrame) dir += 1;
+//#else
+//        if (Input.GetKeyDown(rotateLeftKey))  dir -= 1;
+//        if (Input.GetKeyDown(rotateRightKey)) dir += 1;
+//#endif
+//        return dir;
+//    }
 
     private void ConfigureProjection()
     {
