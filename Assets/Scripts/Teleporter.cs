@@ -1,17 +1,22 @@
 using UnityEngine;
 
 /// <summary>
-/// Teleporter trigger spanning two rooms. When the player enters it, they land just past
-/// the box's camera-side face, i.e. in the room closer to the camera, then (optionally)
-/// step to that room's camera-side edge, face the camera, and the camera slides over.
-/// Because the landing is always toward the camera, the direction of travel follows the
-/// view: rotate the camera 180 degrees and the same box takes you the other way.
+/// Teleporter trigger spanning two rooms. When the player enters it (or, with
+/// requireFullyInside, once the player's collider is entirely inside it), they land just
+/// past the box's camera-side face, i.e. in the room closer to the camera, then
+/// (optionally) step to that room's camera-side edge, face the camera, and the camera
+/// slides over. Because the landing is always toward the camera, the direction of travel
+/// follows the view: rotate the camera 180 degrees and the same box takes you the other way.
 ///
 /// The player needs a kinematic Rigidbody for trigger events to fire.
 /// </summary>
 [RequireComponent(typeof(BoxCollider))]
 public class Teleporter : MonoBehaviour
 {
+    [Tooltip("Only teleport once the player's collider is entirely inside the box, rather than on first contact. " +
+             "The box must be at least as wide and tall as the player's collider.")]
+    [SerializeField] private bool requireFullyInside = true;
+
     [Tooltip("Distance past the box's camera-side face where the player lands, in world units. " +
              "Negative lands inside the box.")]
     [SerializeField] private float landingOffset = 0.25f;
@@ -21,22 +26,153 @@ public class Teleporter : MonoBehaviour
 
     private BoxCollider box;
 
+    // Containment tracking (requireFullyInside).
+    private PlayerController trackedPlayer;
+    private Collider[] trackedColliders;
+    private int overlapCount;
+    private bool armed = true;
+
     private void Awake()
     {
         box = GetComponent<BoxCollider>();
         box.isTrigger = true;
     }
 
+    private void OnDisable()
+    {
+        ClearTracking();
+    }
+
     private void OnTriggerEnter(Collider other)
     {
         PlayerController player = other.GetComponentInParent<PlayerController>();
-        if (player == null || !player.CanTeleport)
+        if (player == null)
         {
             return;
         }
 
+        if (!requireFullyInside)
+        {
+            if (player.CanTeleport)
+            {
+                Teleport(player);
+            }
+            return;
+        }
+
+        // Track the overlap and test containment in Update. Counted per collider, in
+        // case the player has more than one.
+        if (trackedPlayer != player)
+        {
+            trackedPlayer = player;
+            trackedColliders = CollectSolidColliders(player);
+            overlapCount = 0;
+        }
+        ++overlapCount;
+    }
+
+    private void OnTriggerExit(Collider other)
+    {
+        PlayerController player = other.GetComponentInParent<PlayerController>();
+        if (player == null || player != trackedPlayer)
+        {
+            return;
+        }
+        if (--overlapCount <= 0)
+        {
+            ClearTracking();
+        }
+    }
+
+    private void Update()
+    {
+        if (trackedPlayer == null)
+        {
+            return;
+        }
+
+        if (!IsFullyInside(trackedColliders))
+        {
+            // Re-arm once the player is no longer fully inside, so a landing point that
+            // is still inside the box can't retrigger on every cooldown.
+            armed = true;
+            return;
+        }
+
+        if (armed && trackedPlayer.CanTeleport)
+        {
+            armed = false;
+            Teleport(trackedPlayer);
+        }
+    }
+
+    private void Teleport(PlayerController player)
+    {
         Vector3 landing = GetLanding(player.transform.position, player.DirectionToCamera);
         player.TeleportTo(landing, snapToFront, faceCamera, recenterCamera);
+    }
+
+    private void ClearTracking()
+    {
+        trackedPlayer = null;
+        trackedColliders = null;
+        overlapCount = 0;
+        armed = true;
+    }
+
+    private static Collider[] CollectSolidColliders(PlayerController player)
+    {
+        Collider[] all = player.GetComponentsInChildren<Collider>();
+        int count = 0;
+        for (int i = 0; i < all.Length; ++i)
+        {
+            if (!all[i].isTrigger)
+            {
+                all[count++] = all[i];
+            }
+        }
+        System.Array.Resize(ref all, count);
+        return all;
+    }
+
+    /// <summary>
+    /// True if every corner of each collider's world bounds lies inside the box. Tested in
+    /// the box's local space, so rotated boxes work. World AABBs are slightly conservative
+    /// for rotated shapes, which only makes the test stricter.
+    /// </summary>
+    private bool IsFullyInside(Collider[] colliders)
+    {
+        if (colliders == null || colliders.Length == 0)
+        {
+            return false;
+        }
+
+        Vector3 half = box.size * 0.5f;
+        foreach (Collider c in colliders)
+        {
+            if (c == null || !c.enabled)
+            {
+                continue;
+            }
+
+            Bounds b = c.bounds;
+            Vector3 min = b.min;
+            Vector3 max = b.max;
+            for (int i = 0; i < 8; ++i)
+            {
+                Vector3 corner = new Vector3(
+                    (i & 1) == 0 ? min.x : max.x,
+                    (i & 2) == 0 ? min.y : max.y,
+                    (i & 4) == 0 ? min.z : max.z);
+
+                Vector3 local = transform.InverseTransformPoint(corner) - box.center;
+                if (Mathf.Abs(local.x) > half.x || Mathf.Abs(local.y) > half.y || Mathf.Abs(local.z) > half.z)
+                {
+                    return false;
+                }
+            }
+        }
+        return true;
     }
 
     /// <summary>
