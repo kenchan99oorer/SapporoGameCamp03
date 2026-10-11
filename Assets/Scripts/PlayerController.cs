@@ -114,8 +114,22 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public bool DetectMovableArea(BoxCollider avoid = null)
     {
-        Vector3 p = transform.position;
-        int n = Physics.OverlapSphereNonAlloc(p, 0.01f, overlapBuffer, areaMask, QueryTriggerInteraction.Collide);
+        BoxCollider found = FindMovableAreaAt(transform.position, avoid);
+        if (found == null)
+        {
+            return false;
+        }
+        SetMovableArea(found);
+        return true;
+    }
+
+    /// <summary>
+    /// The area box containing a world point, without changing anything. Same selection
+    /// rules as DetectMovableArea. Returns null if no area contains the point.
+    /// </summary>
+    public BoxCollider FindMovableAreaAt(Vector3 point, BoxCollider avoid = null)
+    {
+        int n = Physics.OverlapSphereNonAlloc(point, 0.01f, overlapBuffer, areaMask, QueryTriggerInteraction.Collide);
 
         BoxCollider best = null;
         float bestDist = float.MaxValue;
@@ -129,7 +143,7 @@ public class PlayerController : MonoBehaviour
                     avoidFound = true;
                     continue;
                 }
-                float d = (box.bounds.center - p).sqrMagnitude;
+                float d = (box.bounds.center - point).sqrMagnitude;
                 if (d < bestDist)
                 {
                     bestDist = d;
@@ -138,16 +152,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        if (best == null && avoidFound)
-        {
-            best = avoid;
-        }
-        if (best == null)
-        {
-            return false;
-        }
-        SetMovableArea(best);
-        return true;
+        return best != null ? best : (avoidFound ? avoid : null);
     }
 
     // ------------------------------------------------------------------
@@ -155,21 +160,22 @@ public class PlayerController : MonoBehaviour
     // ------------------------------------------------------------------
 
     /// <summary>
-    /// Teleport to a world position, re-detect the movable area there (preferring a
-    /// different area from the one being left), and optionally move to the area's
-    /// camera-side edge, turn to face the camera, and slide the camera over.
+    /// Teleport to a world position in a different movable area, then optionally move to
+    /// that area's camera-side edge, turn to face the camera, and slide the camera over.
+    /// Does nothing and returns false if the destination isn't inside another area, so a
+    /// teleporter the player is already standing in (in the front room) is a no-op.
     /// </summary>
-    public void TeleportTo(Vector3 destination, bool snapToFront = true, bool faceCamera = true, bool recenterCamera = true)
+    public bool TeleportTo(Vector3 destination, bool snapToFront = true, bool faceCamera = true, bool recenterCamera = true)
     {
-        lastTeleportTime = Time.time;
-
-        BoxCollider previous = movableArea;
-        transform.position = destination;
-        if (!DetectMovableArea(avoid: previous))
+        BoxCollider destinationArea = FindMovableAreaAt(destination, avoid: movableArea);
+        if (destinationArea == null || destinationArea == movableArea)
         {
-            // Destination isn't inside any area; keep the old constraint.
-            SetMovableArea(previous);
+            return false;
         }
+
+        lastTeleportTime = Time.time;
+        transform.position = destination;
+        SetMovableArea(destinationArea);
 
         Vector3 toCamera = DirectionToCamera;
 
@@ -185,6 +191,7 @@ public class PlayerController : MonoBehaviour
         {
             cameraController.RecenterOnPlayer();
         }
+        return true;
     }
 
     /// <summary>

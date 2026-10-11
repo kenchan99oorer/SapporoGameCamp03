@@ -18,11 +18,15 @@ public class Teleporter : MonoBehaviour
     [SerializeField] private bool requireFullyInside = true;
 
     [Tooltip("Distance past the box's camera-side face where the player lands, in world units. " +
-             "Negative lands inside the box.")]
-    [SerializeField] private float landingOffset = 0.25f;
+             "Negative lands inside the box, which is what you want when the box spans both rooms " +
+             "wall to wall. The landing point must fall inside the front room's movable area.")]
+    [SerializeField] private float landingOffset = -0.25f;
     [SerializeField] private bool snapToFront = true;
     [SerializeField] private bool faceCamera = true;
     [SerializeField] private bool recenterCamera = true;
+
+    [Tooltip("Log trigger events, containment changes and teleports to the Console.")]
+    [SerializeField] private bool debugLog = false;
 
     private BoxCollider box;
 
@@ -31,6 +35,7 @@ public class Teleporter : MonoBehaviour
     private Collider[] trackedColliders;
     private int overlapCount;
     private bool armed = true;
+    private bool lastInside;
 
     private void Awake()
     {
@@ -46,6 +51,8 @@ public class Teleporter : MonoBehaviour
     private void OnTriggerEnter(Collider other)
     {
         PlayerController player = other.GetComponentInParent<PlayerController>();
+        Log($"Trigger enter: '{other.name}' (layer {LayerMask.LayerToName(other.gameObject.layer)}, " +
+            $"trigger={other.isTrigger}), PlayerController {(player != null ? "found" : "NOT found")}");
         if (player == null)
         {
             return;
@@ -78,6 +85,7 @@ public class Teleporter : MonoBehaviour
         {
             return;
         }
+        Log($"Trigger exit: '{other.name}'");
         if (--overlapCount <= 0)
         {
             ClearTracking();
@@ -91,12 +99,24 @@ public class Teleporter : MonoBehaviour
             return;
         }
 
-        if (!IsFullyInside(trackedColliders))
+        bool inside = IsFullyInside(trackedColliders);
+        if (inside != lastInside)
+        {
+            lastInside = inside;
+            Log(inside ? "Player fully inside" : $"Player overlapping but not fully inside ({DescribeOverhang()})");
+        }
+
+        if (!inside)
         {
             // Re-arm once the player is no longer fully inside, so a landing point that
             // is still inside the box can't retrigger on every cooldown.
             armed = true;
             return;
+        }
+
+        if (armed && !trackedPlayer.CanTeleport)
+        {
+            Log("Fully inside but teleport cooldown is active");
         }
 
         if (armed && trackedPlayer.CanTeleport)
@@ -109,11 +129,83 @@ public class Teleporter : MonoBehaviour
     private void Teleport(PlayerController player)
     {
         Vector3 landing = GetLanding(player.transform.position, player.DirectionToCamera);
-        player.TeleportTo(landing, snapToFront, faceCamera, recenterCamera);
+        Log($"Teleporting to {landing}, toward camera {player.DirectionToCamera}. " +
+            $"Colliders at landing point: {DescribeCollidersAt(landing)}");
+        if (player.TeleportTo(landing, snapToFront, faceCamera, recenterCamera))
+        {
+            Log($"Landed at {player.transform.position}, movable area: " +
+                $"{(player.MovableArea != null ? player.MovableArea.name : "none")}");
+        }
+        else
+        {
+            Log("Not teleported: the landing point isn't inside a different room's movable area " +
+                "(already in the front room, or the landing point misses the room's collider)");
+        }
+    }
+
+    private static string DescribeCollidersAt(Vector3 point)
+    {
+        Collider[] found = Physics.OverlapSphere(point, 0.01f, ~0, QueryTriggerInteraction.Collide);
+        if (found.Length == 0)
+        {
+            return "none";
+        }
+        System.Text.StringBuilder sb = new();
+        for (int i = 0; i < found.Length; ++i)
+        {
+            if (i > 0)
+            {
+                sb.Append(", ");
+            }
+            sb.Append($"'{found[i].name}' ({LayerMask.LayerToName(found[i].gameObject.layer)}");
+            sb.Append(found[i].isTrigger ? ", trigger)" : ")");
+        }
+        return sb.ToString();
+    }
+
+    private void Log(string message)
+    {
+        if (debugLog)
+        {
+            Debug.Log($"[Teleporter '{name}'] {message}", this);
+        }
+    }
+
+    /// <summary>Which local axes of the box the player's colliders stick out of, for logging.</summary>
+    private string DescribeOverhang()
+    {
+        if (trackedColliders == null || trackedColliders.Length == 0)
+        {
+            return "player has no solid collider";
+        }
+
+        Vector3 half = box.size * 0.5f;
+        bool x = false, y = false, z = false;
+        foreach (Collider c in trackedColliders)
+        {
+            if (c == null || !c.enabled)
+            {
+                continue;
+            }
+            Bounds b = c.bounds;
+            for (int i = 0; i < 8; ++i)
+            {
+                Vector3 corner = new Vector3(
+                    (i & 1) == 0 ? b.min.x : b.max.x,
+                    (i & 2) == 0 ? b.min.y : b.max.y,
+                    (i & 4) == 0 ? b.min.z : b.max.z);
+                Vector3 local = transform.InverseTransformPoint(corner) - box.center;
+                x |= Mathf.Abs(local.x) > half.x;
+                y |= Mathf.Abs(local.y) > half.y;
+                z |= Mathf.Abs(local.z) > half.z;
+            }
+        }
+        return $"sticks out on local {(x ? "X " : "")}{(y ? "Y " : "")}{(z ? "Z" : "")}".TrimEnd();
     }
 
     private void ClearTracking()
     {
+        lastInside = false;
         trackedPlayer = null;
         trackedColliders = null;
         overlapCount = 0;
