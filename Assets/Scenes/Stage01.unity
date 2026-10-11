@@ -232,7 +232,7 @@ Transform:
   m_GameObject: {fileID: 240111944}
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: -7.1999993, y: 1.1, z: -0.00000047683716}
+  m_LocalPosition: {x: -7.9999995, y: 0, z: -0.00000047683716}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
@@ -254,7 +254,7 @@ MonoBehaviour:
   player: {fileID: 614999879}
   playerOffset: {x: 0, y: 0.9, z: 0}
   lockTargetHeight: 0
-  recenterOnStart: 1
+  recenterOnStart: 0
   distance: 8
   pitch: 0
   startYaw: 90
@@ -517,6 +517,9 @@ MonoBehaviour:
   edgeMargin: 0.2
   clampHeight: 0
   teleportCooldown: 0.25
+  centerCameraOnRoom: 1
+  centerDuringRotation: 0
+  roomCameraOffset: {x: 0, y: 0.1, z: 0}
   rotateLeftKey: 61
   rotateRightKey: 62
   moveLeftKey: 15

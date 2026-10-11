@@ -22,6 +22,15 @@ public class PlayerController : MonoBehaviour
     [Tooltip("Seconds after a teleport during which further teleports are ignored.")]
     [SerializeField, Min(0.0f)] private float teleportCooldown = 0.25f;
 
+    [Header("Camera Framing")]
+    [Tooltip("Frame the room the player is in: slide the camera target to the room's center after each " +
+             "camera rotation, after teleports, and at start. Off falls back to recentering on the player after teleports.")]
+    [SerializeField] private bool centerCameraOnRoom = true;
+    [Tooltip("Start the slide as the rotation starts, so both happen together, instead of after it completes.")]
+    [SerializeField] private bool centerDuringRotation = false;
+    [Tooltip("Added to the room center to get the camera target, e.g. to frame slightly higher.")]
+    [SerializeField] private Vector3 roomCameraOffset = Vector3.zero;
+
 #if ENABLE_INPUT_SYSTEM
     [Header("Input (Input System)")]
     [SerializeField] private Key rotateLeftKey = Key.LeftArrow;
@@ -73,6 +82,24 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    private void OnEnable()
+    {
+        if (cameraController != null)
+        {
+            cameraController.RotationStarted += HandleCameraRotationStarted;
+            cameraController.RotationCompleted += HandleCameraRotationCompleted;
+        }
+    }
+
+    private void OnDisable()
+    {
+        if (cameraController != null)
+        {
+            cameraController.RotationStarted -= HandleCameraRotationStarted;
+            cameraController.RotationCompleted -= HandleCameraRotationCompleted;
+        }
+    }
+
     private void Start()
     {
         if (movableArea == null)
@@ -85,6 +112,61 @@ public class PlayerController : MonoBehaviour
         else
         {
             transform.position = ClampToArea(transform.position);
+        }
+
+        // Frame the starting room immediately. Untick Recenter On Start on the camera,
+        // or its own snap to the player may run after this one.
+        if (centerCameraOnRoom && cameraController != null && movableArea != null)
+        {
+            cameraController.SnapTargetTo(RoomCameraTarget);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Camera framing
+    // ------------------------------------------------------------------
+
+    /// <summary>Camera target that frames the current room: its center plus roomCameraOffset.</summary>
+    public Vector3 RoomCameraTarget =>
+        movableArea != null ? movableArea.bounds.center + roomCameraOffset : transform.position;
+
+    /// <summary>
+    /// Slide the camera target to the center of the current room. A negative duration uses
+    /// the camera's default slide duration.
+    /// </summary>
+    public void CenterCameraOnRoom(float duration = -1.0f)
+    {
+        if (cameraController != null && movableArea != null)
+        {
+            cameraController.MoveTargetTo(RoomCameraTarget, duration);
+        }
+    }
+
+#if UNITY_EDITOR
+    private void OnValidate()
+    {
+        // Apply framing edits (e.g. Room Camera Offset) immediately while in Play mode.
+        if (Application.isPlaying && isActiveAndEnabled && centerCameraOnRoom &&
+            cameraController != null && movableArea != null)
+        {
+            cameraController.SnapTargetTo(RoomCameraTarget);
+        }
+    }
+#endif
+
+    private void HandleCameraRotationStarted(float _)
+    {
+        if (centerCameraOnRoom && centerDuringRotation)
+        {
+            CenterCameraOnRoom();
+        }
+    }
+
+    private void HandleCameraRotationCompleted(float _)
+    {
+        if (centerCameraOnRoom && !centerDuringRotation)
+        {
+            CenterCameraOnRoom();
         }
     }
 
@@ -208,7 +290,14 @@ public class PlayerController : MonoBehaviour
         }
         if (recenterCamera && cameraController != null)
         {
-            cameraController.RecenterOnPlayer();
+            if (centerCameraOnRoom)
+            {
+                CenterCameraOnRoom();
+            }
+            else
+            {
+                cameraController.RecenterOnPlayer();
+            }
         }
         return true;
     }
