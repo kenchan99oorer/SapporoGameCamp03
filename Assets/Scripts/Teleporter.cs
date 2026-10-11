@@ -13,7 +13,11 @@ using UnityEngine;
 [RequireComponent(typeof(BoxCollider))]
 public class Teleporter : MonoBehaviour
 {
-    [Tooltip("Only teleport once the player's collider is entirely inside the box, rather than on first contact. " +
+    [Tooltip("Teleport only when the player presses the teleport key (set on PlayerController) while in the box, " +
+             "instead of automatically.")]
+    [SerializeField] private bool requireInput = true;
+
+    [Tooltip("Only allow a teleport once the player's collider is entirely inside the box, rather than on first contact. " +
              "The box must be at least as wide and tall as the player's collider.")]
     [SerializeField] private bool requireFullyInside = true;
 
@@ -30,7 +34,7 @@ public class Teleporter : MonoBehaviour
 
     private BoxCollider box;
 
-    // Containment tracking (requireFullyInside).
+    // Overlap/containment tracking.
     private PlayerController trackedPlayer;
     private Collider[] trackedColliders;
     private int overlapCount;
@@ -58,7 +62,7 @@ public class Teleporter : MonoBehaviour
             return;
         }
 
-        if (!requireFullyInside)
+        if (!requireFullyInside && !requireInput)
         {
             if (player.CanTeleport)
             {
@@ -67,7 +71,7 @@ public class Teleporter : MonoBehaviour
             return;
         }
 
-        // Track the overlap and test containment in Update. Counted per collider, in
+        // Track the overlap; containment and input are checked in Update. Counted per collider, in
         // case the player has more than one.
         if (trackedPlayer != player)
         {
@@ -99,11 +103,13 @@ public class Teleporter : MonoBehaviour
             return;
         }
 
-        bool inside = IsFullyInside(trackedColliders);
+        bool inside = !requireFullyInside || IsFullyInside(trackedColliders);
         if (inside != lastInside)
         {
             lastInside = inside;
-            Log(inside ? "Player fully inside" : $"Player overlapping but not fully inside ({DescribeOverhang()})");
+            Log(inside
+                ? (requireInput ? "Player in position, waiting for the teleport key" : "Player fully inside")
+                : $"Player overlapping but not fully inside ({DescribeOverhang()})");
         }
 
         if (!inside)
@@ -111,6 +117,24 @@ public class Teleporter : MonoBehaviour
             // Re-arm once the player is no longer fully inside, so a landing point that
             // is still inside the box can't retrigger on every cooldown.
             armed = true;
+            return;
+        }
+
+        if (requireInput)
+        {
+            // No arming needed: each press is a deliberate request. Standing in the box in
+            // the front room and pressing again is a no-op (TeleportTo refuses same-room
+            // landings), and after rotating the camera the same press goes the other way.
+            if (!trackedPlayer.TeleportPressed)
+            {
+                return;
+            }
+            if (!trackedPlayer.CanTeleport)
+            {
+                Log("Teleport key pressed but teleport cooldown is active");
+                return;
+            }
+            Teleport(trackedPlayer);
             return;
         }
 

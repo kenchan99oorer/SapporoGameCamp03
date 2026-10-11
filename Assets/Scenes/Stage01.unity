@@ -431,6 +431,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e391aebfcaba2c4eb6dac1feede376a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Teleporter
+  requireInput: 1
   requireFullyInside: 1
   landingOffset: -0.25
   snapToFront: 1
@@ -513,13 +514,14 @@ MonoBehaviour:
   areaMask:
     serializedVersion: 2
     m_Bits: 8
-  edgeMargin: 0.1
+  edgeMargin: 0.2
   clampHeight: 0
   teleportCooldown: 0.25
   rotateLeftKey: 61
   rotateRightKey: 62
   moveLeftKey: 15
   moveRightKey: 18
+  teleportKey: 33
 --- !u!54 &614999881
 Rigidbody:
   m_ObjectHideFlags: 0

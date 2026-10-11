@@ -28,12 +28,14 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private Key rotateRightKey = Key.RightArrow;
     [SerializeField] private Key moveLeftKey = Key.A;
     [SerializeField] private Key moveRightKey = Key.D;
+    [SerializeField] private Key teleportKey = Key.S;
 #else
     [Header("Input (Legacy)")]
     [SerializeField] private KeyCode rotateLeftKey = KeyCode.LeftArrow;
     [SerializeField] private KeyCode rotateRightKey = KeyCode.RightArrow;
     [SerializeField] private KeyCode moveLeftKey = KeyCode.A;
     [SerializeField] private KeyCode moveRightKey = KeyCode.D;
+    [SerializeField] private KeyCode teleportKey = KeyCode.S;
 #endif
 
     private readonly Collider[] overlapBuffer = new Collider[8];
@@ -41,6 +43,23 @@ public class PlayerController : MonoBehaviour
 
     public BoxCollider MovableArea => movableArea;
     public bool CanTeleport => Time.time - lastTeleportTime >= teleportCooldown;
+
+    /// <summary>
+    /// True on the frame the teleport key goes down. Read straight from the input system,
+    /// so it's valid from any script's Update in that frame regardless of execution order.
+    /// </summary>
+    public bool TeleportPressed
+    {
+        get
+        {
+#if ENABLE_INPUT_SYSTEM
+            Keyboard kb = Keyboard.current;
+            return kb != null && kb[teleportKey].wasPressedThisFrame;
+#else
+            return Input.GetKeyDown(teleportKey);
+#endif
+        }
+    }
 
     /// <summary>Horizontal direction toward the camera at its destination yaw.</summary>
     public Vector3 DirectionToCamera =>
