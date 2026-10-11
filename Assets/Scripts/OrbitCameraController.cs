@@ -26,10 +26,10 @@ public class OrbitCameraController : MonoBehaviour
 
     [Header("Placement")]
     [SerializeField, Min(0.01f)] private float distance = 8.0f;
-    [Tooltip("Downward pitch in degrees. 35.264 gives a true isometric view.")]
-    [SerializeField, Range(0.0f, 90.0f)] private float pitch = 35.264f;
+    [Tooltip("Downward pitch in degrees. 0 is a level side-on view.")]
+    [SerializeField, Range(0.0f, 90.0f)] private float pitch = 0.0f;
     [Tooltip("Initial yaw in degrees.")]
-    [SerializeField] private float startYaw = 45.0f;
+    [SerializeField] private float startYaw = 0.0f;
 
     [Header("Projection")]
     [SerializeField, Min(0.01f)] private float orthographicSize = 5.0f;
@@ -58,6 +58,12 @@ public class OrbitCameraController : MonoBehaviour
     /// <summary>Raised when a target slide reaches its destination.</summary>
     public event Action<Vector3> TargetSlideCompleted;
 
+    /// <summary>Raised when a rotation step begins. Argument is the destination yaw.</summary>
+    public event Action<float> RotationStarted;
+
+    /// <summary>Raised when the camera settles at its destination yaw.</summary>
+    public event Action<float> RotationCompleted;
+
     private Camera cam;
 
     // Rotation state.
@@ -84,6 +90,18 @@ public class OrbitCameraController : MonoBehaviour
 
     /// <summary>Yaw the camera is rotating toward. Equals CurrentYaw when settled.</summary>
     public float TargetYaw => toYaw;
+
+    /// <summary>Where the target will end up (slide destination while sliding).</summary>
+    public Vector3 TargetDestination => sliding ? slideTo : currentTarget;
+
+    public Camera Camera => cam != null ? cam : (cam = GetComponent<Camera>());
+
+    /// <summary>Camera rotation for a given yaw at the configured pitch.</summary>
+    public Quaternion RotationForYaw(float yaw) => Quaternion.Euler(pitch, yaw, 0.0f);
+
+    /// <summary>Camera position for a given yaw and target.</summary>
+    public Vector3 PositionFor(float yaw, Vector3 target) =>
+        target - RotationForYaw(yaw) * Vector3.forward * distance;
 
     /// <summary>
     /// Horizontal (XZ) unit direction from the target toward a camera at the given yaw.
@@ -149,6 +167,8 @@ public class OrbitCameraController : MonoBehaviour
         toYaw += direction * stepDegrees;
         rotElapsed = 0.0f;
         rotating = true;
+
+        RotationStarted?.Invoke(toYaw);
     }
 
     /// <summary>
@@ -236,6 +256,8 @@ public class OrbitCameraController : MonoBehaviour
             toYaw = Mathf.Repeat(toYaw, 360.0f);
             currentYaw = fromYaw = toYaw;
             rotating = false;
+            ApplyTransform(currentYaw, currentTarget);
+            RotationCompleted?.Invoke(currentYaw);
         }
         return true;
     }
@@ -293,8 +315,7 @@ public class OrbitCameraController : MonoBehaviour
 
     private void ApplyTransform(float yaw, Vector3 target)
     {
-        Quaternion rot = Quaternion.Euler(pitch, yaw, 0.0f);
-        transform.SetPositionAndRotation(target - rot * Vector3.forward * distance, rot);
+        transform.SetPositionAndRotation(PositionFor(yaw, target), RotationForYaw(yaw));
     }
 
 #if UNITY_EDITOR

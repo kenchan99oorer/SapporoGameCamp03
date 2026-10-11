@@ -3,178 +3,294 @@ using UnityEngine;
 using UnityEngine.Rendering;
 
 /// <summary>
-/// Hides the walls of a room/box that face the OrbitCameraController, so the interior
-/// stays visible after each 90 degree step. Attach to the box root (e.g. box1).
-/// Wall facing is derived from each wall's bounds relative to the box center, so node
-/// names and export order don't matter.
+/// Raycast-driven wall cutaway. For each enabled CutawayBox, casts toward the camera
+/// and hides every wall renderer whose collider the ray crosses. Evaluated only on camera
+/// events (rotation start/complete, target slide complete) and when boxes are added or
+/// removed, never per frame.
+///
+/// Requirements: walls need colliders (MeshCollider is fine) on a layer in wallMask.
+/// Colliders stay active while their renderer is hidden, so gameplay collision and
+/// later raycasts are unaffected.
+///
+/// Add one instance to the Main Camera. Add a CutawayBox to each box.
 /// </summary>
 [DisallowMultipleComponent]
 public class WallCutaway : MonoBehaviour
 {
     [SerializeField] private OrbitCameraController cameraController;
 
-    [Tooltip("Explicit wall renderers. If empty, child renderers whose name starts with the prefix are used.")]
-    [SerializeField] private List<Renderer> walls = new();
-    [SerializeField] private string wallNamePrefix = "側面";
+    [Tooltip("Layers containing wall colliders. Keep floors and ceilings off these layers.")]
+    [SerializeField] private LayerMask wallMask = ~0;
 
-    [Tooltip("Hide walls whose outward direction is within this angle of the camera direction. " +
-             "80 hides one wall when axis-aligned and two walls on a 45 degree diagonal.")]
-    [SerializeField, Range(0.0f, 180.0f)] private float hideAngle = 80.0f;
+    [Tooltip("Radius of a ring of extra rays around each center ray. Makes hits reliable when " +
+             "the center ray exits through a wall seam or corner. 0 casts a single ray.")]
+    [SerializeField, Min(0.0f)] private float sampleRadius = 0.25f;
+    [SerializeField, Range(0, 16)] private int ringSamples = 0;
 
-    [Tooltip("Hidden walls still cast shadows, so interior lighting doesn't change when they hide.")]
+    [Tooltip("Hidden walls still cast shadows, so interior lighting doesn't change.")]
     [SerializeField] private bool keepShadows = true;
 
-    [Tooltip("While rotating, also hide walls facing the destination angle so nothing swings across the view.")]
-    [SerializeField] private bool hideDestinationDuringRotation = true;
+    [SerializeField] private bool drawDebugRays = false;
 
-    private struct Wall
+    private const int MaxHitsPerRay = 32;
+    private readonly RaycastHit[] hitBuffer = new RaycastHit[MaxHitsPerRay];
+    private readonly Dictionary<Collider, Renderer> rendererCache = new();
+    private readonly Dictionary<Renderer, ShadowCastingMode> originalShadows = new();
+    private HashSet<Renderer> hidden = new();
+    private HashSet<Renderer> scratch = new();
+    private bool registryDirty;
+
+    // ------------------------------------------------------------------
+    // Lifecycle
+    // ------------------------------------------------------------------
+
+    private void OnEnable()
     {
-        public Renderer renderer;
-        public Vector3 localOutward;   // outward XZ direction in box-local space
-        public ShadowCastingMode originalShadows;
-        public bool hidden;
-    }
-
-    private readonly List<Wall> wallStates = new();
-    private float cosThreshold;
-
-    private void Awake()
-    {
-        if (cameraController == null)
+        if (cameraController == null && !TryGetComponent(out cameraController))
         {
             cameraController = FindFirstObjectByType<OrbitCameraController>();
         }
         if (cameraController == null)
         {
-            Debug.LogWarning($"{nameof(WallCutaway)} on {name}: no OrbitCameraController found.", this);
+            Debug.LogWarning($"{nameof(WallCutaway)}: no OrbitCameraController found.", this);
             enabled = false;
             return;
         }
 
-        CollectWalls();
-    }
+        cameraController.RotationStarted += HandleRotationStarted;
+        cameraController.RotationCompleted += HandleRotationCompleted;
+        cameraController.TargetSlideCompleted += HandleSlideCompleted;
+        CutawayBox.RegistryChanged += HandleRegistryChanged;
 
-    private void OnValidate()
-    {
-        cosThreshold = Mathf.Cos(hideAngle * Mathf.Deg2Rad);
+        // Boxes that enabled before us are already in the registry; evaluate them.
+        registryDirty = true;
     }
 
     private void OnDisable()
     {
-        // Restore everything so disabling the component never leaves walls missing.
-        for (int i = 0; i < wallStates.Count; ++i)
+        if (cameraController != null)
         {
-            Wall w = wallStates[i];
-            if (w.hidden)
-            {
-                SetHidden(ref w, false);
-                wallStates[i] = w;
-            }
+            cameraController.RotationStarted -= HandleRotationStarted;
+            cameraController.RotationCompleted -= HandleRotationCompleted;
+            cameraController.TargetSlideCompleted -= HandleSlideCompleted;
         }
+        CutawayBox.RegistryChanged -= HandleRegistryChanged;
+        RestoreAll();
     }
 
     private void LateUpdate()
     {
-        // LateUpdate runs after the camera controller's Update, so yaw is current.
-        Vector3 toCamNow = OrbitCameraController.DirectionToCamera(cameraController.CurrentYaw);
-        Vector3 toCamDest = (hideDestinationDuringRotation && cameraController.IsRotating)
-            ? OrbitCameraController.DirectionToCamera(cameraController.TargetYaw)
-            : toCamNow;
-
-        for (int i = 0; i < wallStates.Count; ++i)
+        // Coalesces registry changes, so a stage enabling many boxes in one frame
+        // costs one evaluation.
+        if (registryDirty)
         {
-            Wall w = wallStates[i];
-            if (w.renderer == null)
-            {
-                continue;
-            }
-
-            // Re-derive world outward each frame so moved/rotated boxes still work.
-            Vector3 outward = transform.TransformDirection(w.localOutward);
-            outward.y = 0.0f;
-            outward.Normalize();
-
-            bool hide = Vector3.Dot(outward, toCamNow) > cosThreshold ||
-                        Vector3.Dot(outward, toCamDest) > cosThreshold;
-
-            if (hide != w.hidden)
-            {
-                SetHidden(ref w, hide);
-                wallStates[i] = w;
-            }
+            registryDirty = false;
+            Refresh();
         }
     }
 
-    /// <summary>Rebuild the wall list, e.g. after swapping the box's mesh at runtime.</summary>
-    public void CollectWalls()
-    {
-        OnDisable();
-        wallStates.Clear();
-        cosThreshold = Mathf.Cos(hideAngle * Mathf.Deg2Rad);
+    // ------------------------------------------------------------------
+    // Public API
+    // ------------------------------------------------------------------
 
-        Renderer[] all = GetComponentsInChildren<Renderer>(true);
-        if (all.Length == 0)
+    /// <summary>Re-evaluate against the camera's destination pose.</summary>
+    public void Refresh()
+    {
+        if (cameraController == null)
+        {
+            return;
+        }
+        Evaluate(cameraController.TargetYaw, cameraController.TargetDestination, cameraController.IsRotating);
+    }
+
+    // ------------------------------------------------------------------
+    // Events
+    // ------------------------------------------------------------------
+
+    // Rotation start: add the walls blocking the destination view, but keep the ones
+    // blocking the current view hidden, so nothing swings across the screen mid-turn.
+    private void HandleRotationStarted(float destinationYaw) =>
+        Evaluate(destinationYaw, cameraController.TargetDestination, additive: true);
+
+    // Rotation complete: settle to exactly the walls blocking the final view.
+    private void HandleRotationCompleted(float yaw) =>
+        Evaluate(yaw, cameraController.TargetDestination, additive: false);
+
+    // The camera moves with its target, so re-evaluate after a slide too.
+    private void HandleSlideCompleted(Vector3 _) => Refresh();
+
+    private void HandleRegistryChanged() => registryDirty = true;
+
+    // ------------------------------------------------------------------
+    // Evaluation
+    // ------------------------------------------------------------------
+
+    private void Evaluate(float yaw, Vector3 target, bool additive)
+    {
+        Quaternion camRot = cameraController.RotationForYaw(yaw);
+        Vector3 camPos = cameraController.PositionFor(yaw, target);
+        bool ortho = cameraController.Camera.orthographic;
+
+        scratch.Clear();
+
+        // Rays start inside each box and exit through the walls' inner faces. With
+        // single-sided wall meshes those are back faces, which PhysX skips by default.
+        bool prevBackfaces = Physics.queriesHitBackfaces;
+        Physics.queriesHitBackfaces = true;
+        try
+        {
+            IReadOnlyList<CutawayBox> boxes = CutawayBox.Active;
+            for (int b = 0; b < boxes.Count; ++b)
+            {
+                Vector3 center = boxes[b].WorldCenter;
+                Vector3 dir;
+                float length;
+
+                if (ortho)
+                {
+                    // Ortho view rays are parallel to the camera axis, so the occluders of a
+                    // point lie along -forward up to the camera plane, not on the line to the
+                    // camera position. The two only coincide for a box at the camera target.
+                    dir = camRot * Vector3.back;
+                    length = Vector3.Dot(camPos - center, dir);
+                }
+                else
+                {
+                    Vector3 delta = camPos - center;
+                    length = delta.magnitude;
+                    dir = length > 1e-5f ? delta / length : camRot * Vector3.back;
+                }
+
+                if (length > 0.0f)
+                {
+                    CastSamples(center, dir, length);
+                }
+            }
+        }
+        finally
+        {
+            Physics.queriesHitBackfaces = prevBackfaces;
+        }
+
+        if (additive)
+        {
+            scratch.UnionWith(hidden);
+        }
+        Apply();
+    }
+
+    private void CastSamples(Vector3 origin, Vector3 dir, float length)
+    {
+        CastOne(origin, dir, length);
+
+        if (sampleRadius <= 0.0f || ringSamples == 0)
         {
             return;
         }
 
-        // Box center from the combined bounds of every renderer in the box.
-        Bounds combined = all[0].bounds;
-        for (int i = 1; i < all.Length; ++i)
+        Vector3 right = Vector3.Cross(Vector3.up, dir);
+        if (right.sqrMagnitude < 1e-6f)
         {
-            combined.Encapsulate(all[i].bounds);
+            right = Vector3.Cross(Vector3.forward, dir);
         }
-        Vector3 center = combined.center;
+        right.Normalize();
+        Vector3 up = Vector3.Cross(dir, right);
 
-        IEnumerable<Renderer> source = walls.Count > 0 ? walls : FindByPrefix(all);
-        foreach (Renderer r in source)
+        float step = Mathf.PI * 2.0f / ringSamples;
+        for (int i = 0; i < ringSamples; ++i)
         {
-            if (r == null)
-            {
-                continue;
-            }
-
-            Vector3 d = r.bounds.center - center;
-            d.y = 0.0f;
-            if (d.sqrMagnitude < 1e-6f)
-            {
-                Debug.LogWarning($"{nameof(WallCutaway)}: '{r.name}' is centered on the box, can't determine facing. Skipped.", r);
-                continue;
-            }
-
-            wallStates.Add(new Wall
-            {
-                renderer = r,
-                localOutward = transform.InverseTransformDirection(d.normalized),
-                originalShadows = r.shadowCastingMode,
-                hidden = false,
-            });
+            float a = i * step;
+            Vector3 offset = (right * Mathf.Cos(a) + up * Mathf.Sin(a)) * sampleRadius;
+            CastOne(origin + offset, dir, length);
         }
     }
 
-    private IEnumerable<Renderer> FindByPrefix(Renderer[] all)
+    private void CastOne(Vector3 origin, Vector3 dir, float length)
     {
-        foreach (Renderer r in all)
+        int n = Physics.RaycastNonAlloc(origin, dir, hitBuffer, length, wallMask, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < n; ++i)
         {
-            if (r.name.StartsWith(wallNamePrefix))
+            Renderer r = ResolveRenderer(hitBuffer[i].collider);
+            if (r != null)
             {
-                yield return r;
+                scratch.Add(r);
             }
+        }
+
+        if (drawDebugRays)
+        {
+            Debug.DrawRay(origin, dir * length, n > 0 ? Color.red : Color.green, 2.0f);
         }
     }
 
-    private void SetHidden(ref Wall w, bool hide)
+    private Renderer ResolveRenderer(Collider c)
     {
+        if (!rendererCache.TryGetValue(c, out Renderer r))
+        {
+            if (!c.TryGetComponent(out r))
+            {
+                r = c.GetComponentInParent<Renderer>();
+            }
+            rendererCache[c] = r;   // cache misses too
+        }
+        return r;
+    }
+
+    // ------------------------------------------------------------------
+    // Visibility
+    // ------------------------------------------------------------------
+
+    private void Apply()
+    {
+        // Drop walls destroyed along with their box.
+        hidden.RemoveWhere(r => r == null);
+
+        foreach (Renderer r in hidden)
+        {
+            if (!scratch.Contains(r))
+            {
+                SetHidden(r, false);
+            }
+        }
+        foreach (Renderer r in scratch)
+        {
+            if (!hidden.Contains(r))
+            {
+                SetHidden(r, true);
+            }
+        }
+        (hidden, scratch) = (scratch, hidden);
+    }
+
+    private void RestoreAll()
+    {
+        foreach (Renderer r in hidden)
+        {
+            if (r != null)
+            {
+                SetHidden(r, false);
+            }
+        }
+        hidden.Clear();
+    }
+
+    private void SetHidden(Renderer r, bool hide)
+    {
+        if (!originalShadows.TryGetValue(r, out ShadowCastingMode original))
+        {
+            original = r.shadowCastingMode;
+            originalShadows[r] = original;
+        }
+
         if (keepShadows)
         {
-            w.renderer.enabled = true;
-            w.renderer.shadowCastingMode = hide ? ShadowCastingMode.ShadowsOnly : w.originalShadows;
+            r.enabled = true;
+            r.shadowCastingMode = hide ? ShadowCastingMode.ShadowsOnly : original;
         }
         else
         {
-            w.renderer.shadowCastingMode = w.originalShadows;
-            w.renderer.enabled = !hide;
+            r.shadowCastingMode = original;
+            r.enabled = !hide;
         }
-        w.hidden = hide;
     }
 }

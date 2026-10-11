@@ -1,9 +1,12 @@
 using UnityEngine;
+#if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
+#endif
 
 public class PlayerController : MonoBehaviour
 {
     [SerializeField] private OrbitCameraController cameraController;
+    [SerializeField, Min(0.0f)] private float moveSpeed = 4.0f;
 
 #if ENABLE_INPUT_SYSTEM
     [Header("Input (Input System)")]
@@ -19,29 +22,35 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private KeyCode moveRightKey = KeyCode.D;
 #endif
 
-    // Start is called once before the first execution of Update after the MonoBehaviour is created
-    void Start()
+    private void Awake()
     {
-
-    }
-
-    // Update is called once per frame
-    void Update()
-    {
-        int direction = ReadInput();
-        if (direction != 0)
+        if (cameraController == null)
         {
-            cameraController.BeginStep(direction);
-        }
-
-        int dir = PlayerInput();
-        if (dir != 0)
-        {
-            transform.position += new Vector3(dir * 4.0f * Time.deltaTime, 0.0f, 0.0f);
+            cameraController = FindFirstObjectByType<OrbitCameraController>();
         }
     }
 
-    private int ReadInput()
+    private void Update()
+    {
+        int rotate = ReadRotateInput();
+        if (rotate != 0 && cameraController != null)
+        {
+            cameraController.BeginStep(rotate);
+        }
+
+        int move = ReadMoveInput();
+        if (move != 0)
+        {
+            // Move along the camera's screen-right axis so A/D stay left/right after the
+            // view rotates. TargetYaw switches the axis as soon as the rotation key is
+            // pressed rather than drifting with the swing.
+            float yaw = cameraController != null ? cameraController.TargetYaw : 0.0f;
+            Vector3 right = Quaternion.Euler(0.0f, yaw, 0.0f) * Vector3.right;
+            transform.position += right * (move * moveSpeed * Time.deltaTime);
+        }
+    }
+
+    private int ReadRotateInput()
     {
         int dir = 0;
 #if ENABLE_INPUT_SYSTEM
@@ -50,7 +59,7 @@ public class PlayerController : MonoBehaviour
         {
             return 0;
         }
-        if (kb[rotateLeftKey].wasPressedThisFrame) dir -= 1;
+        if (kb[rotateLeftKey].wasPressedThisFrame)  dir -= 1;
         if (kb[rotateRightKey].wasPressedThisFrame) dir += 1;
 #else
         if (Input.GetKeyDown(rotateLeftKey))  dir -= 1;
@@ -59,7 +68,7 @@ public class PlayerController : MonoBehaviour
         return dir;
     }
 
-    private int PlayerInput()
+    private int ReadMoveInput()
     {
         int dir = 0;
 #if ENABLE_INPUT_SYSTEM
@@ -68,15 +77,13 @@ public class PlayerController : MonoBehaviour
         {
             return 0;
         }
-        if (kb[moveLeftKey].isPressed) dir -= 1;
+        if (kb[moveLeftKey].isPressed)  dir -= 1;
         if (kb[moveRightKey].isPressed) dir += 1;
 #else
-        if (Input.GetKeyDown(moveLeftKey))  dir -= 1;
-        if (Input.GetKeyDown(moveRightKey)) dir += 1;
+        // Held, not pressed-this-frame, to match isPressed above.
+        if (Input.GetKey(moveLeftKey))  dir -= 1;
+        if (Input.GetKey(moveRightKey)) dir += 1;
 #endif
         return dir;
     }
-
 }
-
-
