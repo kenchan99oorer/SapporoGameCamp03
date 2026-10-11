@@ -41,13 +41,8 @@ MonoBehaviour:
   m_GameObject: {fileID: 8830473847953660042}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 1ea8321124ec929479d0bad9d73ed350, type: 3}
+  m_Script: {fileID: 11500000, guid: 7df59c0269599ce47b46b2af1fe8634f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::SoundPlayer
-  entries:
-  - label: 0
-    prefab: {fileID: 2152865187895106124, guid: 4837875d529a82c439a39ad2c34fcf32, type: 3}
-    defaultClip: {fileID: 8300000, guid: d687bdbd7e54a034491102809d06d48a, type: 3}
-    loop: 1
-    volume: 1
+  entries: []
   root: {fileID: 0}

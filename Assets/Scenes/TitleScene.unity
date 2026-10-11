@@ -482,7 +482,12 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 7df59c0269599ce47b46b2af1fe8634f, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::AudioPlayer
-  entries: []
+  entries:
+  - label: 0
+    prefab: {fileID: 8675229195604900201, guid: d52453f69376be14a8efd495ba34c586, type: 3}
+    defaultClip: {fileID: 8300000, guid: 2193581078d0e2847a5e0424540123e1, type: 3}
+    loop: 1
+    volume: 1
   root: {fileID: 0}
 --- !u!1 &1206482906
 GameObject:
