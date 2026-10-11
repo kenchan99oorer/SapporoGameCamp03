@@ -650,7 +650,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 73a96e262af31e54ca6230b04eb0ed6e, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TitleManager
-  nextSceneName: Stage01
+  nextSceneName: Tutorial02
   audioPlayer: {fileID: 1015030856}
 --- !u!4 &1442436843
 Transform:
