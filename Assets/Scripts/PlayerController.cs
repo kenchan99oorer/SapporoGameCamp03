@@ -6,7 +6,7 @@ using UnityEngine.InputSystem;
 public class PlayerController : MonoBehaviour
 {
     [SerializeField] private OrbitCameraController cameraController;
-    [SerializeField, Min(0.0f)] private float moveSpeed = 4.0f;
+    [SerializeField, Min(0.0f)] private float moveSpeed = 1.0f;
 
 #if ENABLE_INPUT_SYSTEM
     [Header("Input (Input System)")]
