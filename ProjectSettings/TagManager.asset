@@ -11,8 +11,8 @@ TagManager:
   - MoveableArea
   - Water
   - UI
-  - 
-  - 
+  - Player
+  - Teleport
   - 
   - 
   - 
