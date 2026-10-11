@@ -80,6 +80,6 @@ Material:
     m_Colors:
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _EmissionColor: {r: 0, g: 0, b: 0, a: 1}
-    - _XRayColor: {r: 0.29999998, g: 0.6, b: 1, a: 0.75}
+    - _XRayColor: {r: 0.3207547, g: 0.15023954, b: 0.14676042, a: 0.75}
   m_BuildTextureStacks: []
   m_AllowLocking: 1

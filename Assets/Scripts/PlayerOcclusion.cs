@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Serialization;
 
 /// <summary>
 /// Keeps the player visible through walls and reports when another box hides it.
@@ -20,15 +21,23 @@ public class PlayerOcclusion : MonoBehaviour
 {
     [SerializeField] private Camera viewCamera;
 
-    [Tooltip("Layers whose colliders can hide the player (your wall layer).")]
+    [Tooltip("Layers whose colliders can hide the player: wall colliders, or each room's volume collider.")]
     [SerializeField] private LayerMask occluderMask;
 
-    [Tooltip("Material using Custom/OcclusionXRay. Appended to the player's renderers at runtime.")]
+    [Tooltip("Set to Collide if the occluders are trigger colliders (e.g. the rooms' movable-area boxes).")]
+    [SerializeField] private QueryTriggerInteraction occluderTriggers = QueryTriggerInteraction.Ignore;
+
+    [Tooltip("Material using Custom/OcclusionXRay. Appended to the player's renderers at runtime. " +
+             "Its own color is overridden by Occluded Color.")]
     [SerializeField] private Material xRayMaterial;
 
-    [Tooltip("Replace the player's base color while occluded.")]
+    [Tooltip("Color of the hidden parts (alpha sets their opacity) and, with Tint When Occluded, " +
+             "of the visible parts while occluded.")]
+    [FormerlySerializedAs("occludedTint")]
+    [SerializeField] private Color occludedColor = new Color(0.3f, 0.6f, 1.0f, 0.75f);
+
+    [Tooltip("Replace the player's base color with Occluded Color while occluded.")]
     [SerializeField] private bool tintWhenOccluded = true;
-    [SerializeField] private Color occludedTint = new Color(0.3f, 0.6f, 1.0f, 1.0f);
 
     [Tooltip("How far toward the edges of the player's bounds the outer sample rays sit. 0 puts all rays at the center.")]
     [SerializeField, Range(0.0f, 1.0f)] private float sampleSpread = 0.8f;
@@ -43,6 +52,7 @@ public class PlayerOcclusion : MonoBehaviour
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor"); // URP Lit/Unlit
     private static readonly int ColorId = Shader.PropertyToID("_Color");         // Built-in Standard
+    private static readonly int XRayColorId = Shader.PropertyToID("_XRayColor");  // OcclusionXRay
 
     private const int SampleCount = 5;
     private readonly Vector3[] samples = new Vector3[SampleCount];
@@ -51,7 +61,9 @@ public class PlayerOcclusion : MonoBehaviour
     private PlayerController player;
     private Renderer[] renderers;
     private int[] baseMaterialCounts;
+    private int[] xRayIndices;
     private MaterialPropertyBlock tintBlock;
+    private MaterialPropertyBlock xRayBlock;
     private MaterialPropertyBlock emptyBlock;
 
     private BoxCollider cachedArea;
@@ -79,9 +91,22 @@ public class PlayerOcclusion : MonoBehaviour
         }
         renderers = list.ToArray();
         baseMaterialCounts = new int[renderers.Length];
+        xRayIndices = new int[renderers.Length];
 
         tintBlock = new MaterialPropertyBlock();
+        xRayBlock = new MaterialPropertyBlock();
         emptyBlock = new MaterialPropertyBlock();
+    }
+
+    private void OnValidate()
+    {
+        // Apply color edits live in Play mode.
+        if (!Application.isPlaying || renderers == null || !isActiveAndEnabled)
+        {
+            return;
+        }
+        ApplyXRayColor();
+        ApplyTint(IsOccluded && tintWhenOccluded);
     }
 
     private void OnEnable()
@@ -193,7 +218,7 @@ public class PlayerOcclusion : MonoBehaviour
 
     private bool IsBlocked(Vector3 origin, Vector3 dir, float length, Transform ownBox)
     {
-        int n = Physics.RaycastNonAlloc(origin, dir, hitBuffer, length, occluderMask, QueryTriggerInteraction.Ignore);
+        int n = Physics.RaycastNonAlloc(origin, dir, hitBuffer, length, occluderMask, occluderTriggers);
         for (int i = 0; i < n; ++i)
         {
             Transform t = hitBuffer[i].collider.transform;
@@ -207,8 +232,9 @@ public class PlayerOcclusion : MonoBehaviour
     }
 
     /// <summary>
-    /// The box the player is in: the CutawayBox above the current movable area if there is
-    /// one, otherwise the area's parent (the MovableArea child sits under its box).
+    /// The room the player is in: the area itself when it sits on the room root (it has the
+    /// room's renderers under it), otherwise the area's parent (a MovableArea child under
+    /// its room).
     /// </summary>
     private Transform ResolveOwnBox()
     {
@@ -222,10 +248,14 @@ public class PlayerOcclusion : MonoBehaviour
             }
             else
             {
-                CutawayBox marker = area.GetComponentInParent<CutawayBox>();
-                cachedOwnBox = marker != null ? marker.transform
-                             : area.transform.parent != null ? area.transform.parent
-                             : area.transform;
+                if (area.GetComponentInChildren<Renderer>(true) != null || area.transform.parent == null)
+                {
+                    cachedOwnBox = area.transform;
+                }
+                else
+                {
+                    cachedOwnBox = area.transform.parent;
+                }
             }
         }
         return cachedOwnBox;
@@ -265,6 +295,7 @@ public class PlayerOcclusion : MonoBehaviour
             Material[] mats = renderers[i].sharedMaterials;
             int existing = xRayMaterial != null ? Array.IndexOf(mats, xRayMaterial) : -1;
             baseMaterialCounts[i] = existing >= 0 ? mats.Length - 1 : mats.Length;
+            xRayIndices[i] = xRayMaterial == null ? -1 : (existing >= 0 ? existing : mats.Length);
 
             if (xRayMaterial == null || existing >= 0)
             {
@@ -277,6 +308,20 @@ public class PlayerOcclusion : MonoBehaviour
             extended[mats.Length] = xRayMaterial;
             renderers[i].sharedMaterials = extended;
         }
+
+        ApplyXRayColor();
+    }
+
+    private void ApplyXRayColor()
+    {
+        xRayBlock.SetColor(XRayColorId, occludedColor);
+        for (int i = 0; i < renderers.Length; ++i)
+        {
+            if (renderers[i] != null && xRayIndices[i] >= 0)
+            {
+                renderers[i].SetPropertyBlock(xRayBlock, xRayIndices[i]);
+            }
+        }
     }
 
     private void RemoveXRay()
@@ -285,11 +330,17 @@ public class PlayerOcclusion : MonoBehaviour
         {
             return;
         }
-        foreach (Renderer r in renderers)
+        for (int i = 0; i < renderers.Length; ++i)
         {
+            Renderer r = renderers[i];
             if (r == null)
             {
                 continue;
+            }
+            if (xRayIndices[i] >= 0)
+            {
+                r.SetPropertyBlock(emptyBlock, xRayIndices[i]);
+                xRayIndices[i] = -1;
             }
             Material[] mats = r.sharedMaterials;
             if (Array.IndexOf(mats, xRayMaterial) < 0)
@@ -304,8 +355,11 @@ public class PlayerOcclusion : MonoBehaviour
 
     private void ApplyTint(bool on)
     {
-        tintBlock.SetColor(BaseColorId, occludedTint);
-        tintBlock.SetColor(ColorId, occludedTint);
+        // Alpha is only meaningful for the x-ray; the base color stays opaque.
+        Color tint = occludedColor;
+        tint.a = 1.0f;
+        tintBlock.SetColor(BaseColorId, tint);
+        tintBlock.SetColor(ColorId, tint);
 
         // Per-material blocks, so the x-ray material keeps its own color.
         for (int i = 0; i < renderers.Length; ++i)
