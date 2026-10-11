@@ -18,13 +18,18 @@ public class ResultManager : MonoBehaviour
     {
         if (ButtonController.IsPressed(Key.Enter))
         {
-            SceneController sceneControlller = FindAnyObjectByType<SceneController>();
-            sceneControlller.SetScene(selectSceneName);
+            SetNextScene();
         }
 
         if (ButtonController.IsPressed(Key.Escape))
         { // ÉAÉvÉäèIóπ
             Application.Quit();
         }
+    }
+
+    public void SetNextScene()
+    {
+        SceneController sceneControlller = FindAnyObjectByType<SceneController>();
+        sceneControlller.SetScene(selectSceneName);
     }
 }

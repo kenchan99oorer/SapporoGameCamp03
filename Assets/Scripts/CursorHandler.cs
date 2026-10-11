@@ -28,7 +28,7 @@ public class CursorHandler : MonoBehaviour, IPointerEnterHandler, IPointerExitHa
     public void OnPointerEnter(PointerEventData eventData)
     {
         defScale = transform.localScale;
-        transform.localScale *= 1.5f;
+        transform.localScale *= 1.25f;
         _isPointerEnter = true;
     }
 
