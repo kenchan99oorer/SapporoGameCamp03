@@ -8,7 +8,7 @@ ModelImporter:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: hanger rack
-    second: {fileID: 2100000, guid: 1d5161f7cebfba649b8887ff8a308c26, type: 2}
+    second: {fileID: 2100000, guid: 5f8143a2b2a11f146bb20790ab8ce298, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0

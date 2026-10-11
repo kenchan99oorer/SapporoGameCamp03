@@ -8,17 +8,17 @@ ModelImporter:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: Backrest
-    second: {fileID: 2100000, guid: 06bc3032291877f4e8e7c93ea3c72dce, type: 2}
+    second: {fileID: 2100000, guid: 81bc4b4dbd66eee4285499233349d358, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: Leg
-    second: {fileID: 2100000, guid: 1476194f5c429cf4e9f463c3d5e092d7, type: 2}
+    second: {fileID: 2100000, guid: eacd7b73a5e56d94b8403b727020253e, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: Seat
-    second: {fileID: 2100000, guid: 6fe1d12041721a140808472fda61f272, type: 2}
+    second: {fileID: 2100000, guid: a9d137032fa7300499fdc6d45468940d, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0

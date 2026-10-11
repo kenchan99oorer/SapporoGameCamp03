@@ -1,5 +1,5 @@
 fileFormatVersion: 2
-guid: 5ed1c73cedb78de4fa7ed16168dfb194
+guid: 120b9be6580a30a4eb6d52d819b7bbd6
 ModelImporter:
   serializedVersion: 24300
   internalIDToNameTable: []
@@ -8,32 +8,32 @@ ModelImporter:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: book shelf
-    second: {fileID: 2100000, guid: b2fcd174c2b49af4eb07ed1f9024d09c, type: 2}
+    second: {fileID: 2100000, guid: f4b7aeb118da2914c84df45d079da516, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: book_01
-    second: {fileID: 2100000, guid: 44eb1662b17193e4bbd1b7d62c89ab3a, type: 2}
+    second: {fileID: 2100000, guid: 116fc4f84af0a124ab545ff50b34940a, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: book_02
-    second: {fileID: 2100000, guid: ba5556de1ad0b0740b138631bebaaf3d, type: 2}
+    second: {fileID: 2100000, guid: 0fee27db456e3524f8367b0b320c3d17, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: book_03
-    second: {fileID: 2100000, guid: a04bdd6ab597adc4fb7372123e9e37ff, type: 2}
+    second: {fileID: 2100000, guid: b8772555285c4ba47954dd1e20956bbb, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: book_04
-    second: {fileID: 2100000, guid: 9bc69ab61f31da14fa6438d6e201dfbc, type: 2}
+    second: {fileID: 2100000, guid: 559d146e677dd28438fa92d0f5a22418, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: book_05
-    second: {fileID: 2100000, guid: f1eb7fad4b2594944b3522b523d38c53, type: 2}
+    second: {fileID: 2100000, guid: 5cd21289fae947645b090275599954b6, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0

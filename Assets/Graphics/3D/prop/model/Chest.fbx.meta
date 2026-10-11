@@ -8,12 +8,12 @@ ModelImporter:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: Chest_01
-    second: {fileID: 2100000, guid: 456f57e71bbeda846a9bfa99eb65f672, type: 2}
+    second: {fileID: 2100000, guid: 96814c043ae4133479358db044759af2, type: 2}
   - first:
       type: UnityEngine:Material
       assembly: UnityEngine.CoreModule
       name: Chest_02
-    second: {fileID: 2100000, guid: 0b9114dac483a164595b8c90b1bb6413, type: 2}
+    second: {fileID: 2100000, guid: 3d30d7c26a7f20a4397141db4a3c8bb6, type: 2}
   materials:
     materialImportMode: 2
     materialName: 0
