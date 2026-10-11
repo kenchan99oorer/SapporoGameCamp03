@@ -26,6 +26,7 @@ public class TresureBoxController : MonoBehaviour
     #region TEST
     private void OnTriggerEnter(Collider other)
     {
+        if (other.tag != "Player") return;
         Open();
     }
     #endregion

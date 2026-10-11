@@ -625,6 +625,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e391aebfcaba2c4eb6dac1feede376a, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Teleporter
+  requireInput: 1
   requireFullyInside: 1
   landingOffset: -0.25
   snapToFront: 1
@@ -721,9 +722,10 @@ GameObject:
   - component: {fileID: 614999881}
   - component: {fileID: 614999882}
   - component: {fileID: 614999883}
+  - component: {fileID: 614999884}
   m_Layer: 6
   m_Name: Player
-  m_TagString: Untagged
+  m_TagString: Player
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -843,10 +845,14 @@ MonoBehaviour:
   edgeMargin: 0.1
   clampHeight: 0
   teleportCooldown: 0.25
+  centerCameraOnRoom: 1
+  centerDuringRotation: 0
+  roomCameraOffset: {x: 0, y: 0, z: 0}
   rotateLeftKey: 61
   rotateRightKey: 62
   moveLeftKey: 15
   moveRightKey: 18
+  teleportKey: 33
 --- !u!54 &614999881
 Rigidbody:
   m_ObjectHideFlags: 0
@@ -911,6 +917,27 @@ MonoBehaviour:
   animator: {fileID: 860400945}
   spriteRenderer: {fileID: 860400946}
   moveThreshold: 0.1
+--- !u!65 &614999884
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 614999875}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 0
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 1, y: 1, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}
 --- !u!1001 &669498843
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -1261,6 +1288,12 @@ PrefabInstance:
     - targetCorrespondingSourceObject: {fileID: 5295821638295429407, guid: 4403bbf7261cd914ca061ffec0caf30e, type: 3}
       insertIndex: -1
       addedObject: {fileID: 2095664629}
+    - targetCorrespondingSourceObject: {fileID: 5295821638295429407, guid: 4403bbf7261cd914ca061ffec0caf30e, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 2095664631}
+    - targetCorrespondingSourceObject: {fileID: 5295821638295429407, guid: 4403bbf7261cd914ca061ffec0caf30e, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 2095664632}
   m_SourcePrefab: {fileID: 100100000, guid: 4403bbf7261cd914ca061ffec0caf30e, type: 3}
 --- !u!4 &1094450092 stripped
 Transform:
@@ -1877,6 +1910,54 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::TresureBoxController
   openAnimationName: 
+--- !u!65 &2095664631
+BoxCollider:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2095664627}
+  m_Material: {fileID: 0}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_LayerOverridePriority: 0
+  m_IsTrigger: 1
+  m_ProvidesContacts: 0
+  m_Enabled: 1
+  serializedVersion: 3
+  m_Size: {x: 1, y: 1, z: 1}
+  m_Center: {x: 0, y: 0, z: 0}
+--- !u!54 &2095664632
+Rigidbody:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2095664627}
+  serializedVersion: 5
+  m_Mass: 1
+  m_LinearDamping: 0
+  m_AngularDamping: 0.05
+  m_CenterOfMass: {x: 0, y: 0, z: 0}
+  m_InertiaTensor: {x: 1, y: 1, z: 1}
+  m_InertiaRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_IncludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ExcludeLayers:
+    serializedVersion: 2
+    m_Bits: 0
+  m_ImplicitCom: 1
+  m_ImplicitTensor: 1
+  m_UseGravity: 0
+  m_IsKinematic: 0
+  m_Interpolate: 0
+  m_Constraints: 0
+  m_CollisionDetection: 0
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0
