@@ -4,16 +4,22 @@ using UnityEngine;
 using UnityEngine.Serialization;
 
 /// <summary>
-/// Keeps the player visible through walls and reports when another box hides it.
+/// Keeps the player visible through walls and reports when another room hides it.
 ///
-/// Rendering: appends an OcclusionXRay material to the player's renderers, so any part
-/// of the player behind geometry is drawn in a flat color.
+/// Rendering:
+///  - MeshRenderer / SkinnedMeshRenderer (3D models, billboard quads): an OcclusionXRay
+///    material is appended, so hidden parts draw in a flat color. For alpha-tested or
+///    transparent base materials (typical billboards), the base texture is passed to the
+///    x-ray so the silhouette follows the visible shape instead of the whole quad.
+///  - SpriteRenderer: a sprite can't take a second material, so a child mirror
+///    SpriteRenderer using OcclusionXRaySprite copies the sprite every frame.
 ///
 /// Logic: each frame, casts a few rays from the player's bounds toward the camera against
-/// occluderMask. A hit on any box other than the one the player is currently in counts
-/// as occluded (the player's own box is excluded, since its camera-side walls are culled
-/// by the inverted normals but still have colliders). On a change, optionally tints the
-/// player's base color and raises OcclusionChanged.
+/// occluderMask. A hit on any room other than the one the player is in counts as
+/// occluded. On a change, optionally tints the player and raises OcclusionChanged.
+///
+/// Renderers are collected in Awake. Call RefreshRenderers() if the player's visuals
+/// change at runtime.
 /// </summary>
 [RequireComponent(typeof(PlayerController))]
 [DisallowMultipleComponent]
@@ -27,22 +33,26 @@ public class PlayerOcclusion : MonoBehaviour
     [Tooltip("Set to Collide if the occluders are trigger colliders (e.g. the rooms' movable-area boxes).")]
     [SerializeField] private QueryTriggerInteraction occluderTriggers = QueryTriggerInteraction.Ignore;
 
-    [Tooltip("Material using Custom/OcclusionXRay. Appended to the player's renderers at runtime. " +
-             "Its own color is overridden by Occluded Color.")]
+    [Header("X-Ray")]
+    [Tooltip("Material using Custom/OcclusionXRay, for mesh renderers (3D models, billboard quads).")]
     [SerializeField] private Material xRayMaterial;
+
+    [Tooltip("Material using Custom/OcclusionXRaySprite, for SpriteRenderers.")]
+    [SerializeField] private Material xRaySpriteMaterial;
 
     [Tooltip("Color of the hidden parts (alpha sets their opacity) and, with Tint When Occluded, " +
              "of the visible parts while occluded.")]
     [FormerlySerializedAs("occludedTint")]
     [SerializeField] private Color occludedColor = new Color(0.3f, 0.6f, 1.0f, 0.75f);
 
-    [Tooltip("Replace the player's base color with Occluded Color while occluded.")]
+    [Tooltip("Tint the visible parts of the player with Occluded Color while occluded.")]
     [SerializeField] private bool tintWhenOccluded = true;
 
+    [Header("Detection")]
     [Tooltip("How far toward the edges of the player's bounds the outer sample rays sit. 0 puts all rays at the center.")]
     [SerializeField, Range(0.0f, 1.0f)] private float sampleSpread = 0.8f;
 
-    /// <summary>True when any sample ray is blocked by another box.</summary>
+    /// <summary>True when any sample ray is blocked by another room.</summary>
     public bool IsOccluded { get; private set; }
 
     /// <summary>Fraction of sample rays blocked, 0 to 1.</summary>
@@ -50,21 +60,41 @@ public class PlayerOcclusion : MonoBehaviour
 
     public event Action<bool> OcclusionChanged;
 
-    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor"); // URP Lit/Unlit
-    private static readonly int ColorId = Shader.PropertyToID("_Color");         // Built-in Standard
-    private static readonly int XRayColorId = Shader.PropertyToID("_XRayColor");  // OcclusionXRay
+    private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");   // URP Lit/Unlit
+    private static readonly int ColorId = Shader.PropertyToID("_Color");           // Built-in
+    private static readonly int XRayColorId = Shader.PropertyToID("_XRayColor");
+    private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
+    private static readonly int MainTexStId = Shader.PropertyToID("_MainTex_ST");
+    private const int AlphaTestQueue = 2450;
 
     private const int SampleCount = 5;
     private readonly Vector3[] samples = new Vector3[SampleCount];
     private readonly RaycastHit[] hitBuffer = new RaycastHit[16];
 
+    private struct MeshEntry
+    {
+        public Renderer renderer;
+        public int baseCount;      // materials excluding the x-ray
+        public int xRayIndex;      // -1 when no x-ray slot
+        public Texture shapeTex;   // base texture for alpha silhouettes, or null
+        public Vector4 shapeSt;
+    }
+
+    private struct SpriteEntry
+    {
+        public SpriteRenderer source;
+        public SpriteRenderer mirror;
+        public Color originalColor;
+    }
+
+    private readonly List<MeshEntry> meshes = new();
+    private readonly List<SpriteEntry> sprites = new();
+    private readonly HashSet<SpriteRenderer> mirrorSet = new();
+
     private PlayerController player;
-    private Renderer[] renderers;
-    private int[] baseMaterialCounts;
-    private int[] xRayIndices;
-    private MaterialPropertyBlock tintBlock;
-    private MaterialPropertyBlock xRayBlock;
+    private MaterialPropertyBlock block;
     private MaterialPropertyBlock emptyBlock;
+    private bool tinted;
 
     private BoxCollider cachedArea;
     private Transform cachedOwnBox;
@@ -80,44 +110,18 @@ public class PlayerOcclusion : MonoBehaviour
         {
             viewCamera = Camera.main;
         }
-
-        List<Renderer> list = new();
-        foreach (Renderer r in GetComponentsInChildren<Renderer>(true))
-        {
-            if (r is MeshRenderer || r is SkinnedMeshRenderer)
-            {
-                list.Add(r);
-            }
-        }
-        renderers = list.ToArray();
-        baseMaterialCounts = new int[renderers.Length];
-        xRayIndices = new int[renderers.Length];
-
-        tintBlock = new MaterialPropertyBlock();
-        xRayBlock = new MaterialPropertyBlock();
+        block = new MaterialPropertyBlock();
         emptyBlock = new MaterialPropertyBlock();
-    }
-
-    private void OnValidate()
-    {
-        // Apply color edits live in Play mode.
-        if (!Application.isPlaying || renderers == null || !isActiveAndEnabled)
-        {
-            return;
-        }
-        ApplyXRayColor();
-        ApplyTint(IsOccluded && tintWhenOccluded);
     }
 
     private void OnEnable()
     {
-        AddXRay();
+        Attach();
     }
 
     private void OnDisable()
     {
-        ApplyTint(false);
-        RemoveXRay();
+        Detach();
         if (IsOccluded)
         {
             IsOccluded = false;
@@ -126,9 +130,22 @@ public class PlayerOcclusion : MonoBehaviour
         }
     }
 
+    private void OnValidate()
+    {
+        // Apply color edits live in Play mode.
+        if (!Application.isPlaying || block == null || !isActiveAndEnabled)
+        {
+            return;
+        }
+        ApplyXRayColor();
+        SetTint(IsOccluded && tintWhenOccluded, force: true);
+    }
+
     private void LateUpdate()
     {
-        // LateUpdate: after the player has moved and the camera has updated this frame.
+        // LateUpdate: after the player has moved/animated and the camera has updated.
+        SyncSpriteMirrors();
+
         if (viewCamera == null)
         {
             return;
@@ -141,9 +158,276 @@ public class PlayerOcclusion : MonoBehaviour
         if (occluded != IsOccluded)
         {
             IsOccluded = occluded;
-            ApplyTint(occluded && tintWhenOccluded);
+            SetTint(occluded && tintWhenOccluded, force: false);
             OcclusionChanged?.Invoke(occluded);
         }
+    }
+
+    /// <summary>Re-collect the player's renderers, e.g. after swapping its visuals.</summary>
+    public void RefreshRenderers()
+    {
+        if (!isActiveAndEnabled)
+        {
+            return;
+        }
+        Detach();
+        Attach();
+        SetTint(IsOccluded && tintWhenOccluded, force: true);
+    }
+
+    private void Attach()
+    {
+        foreach (Renderer r in GetComponentsInChildren<Renderer>(true))
+        {
+            if (r is SpriteRenderer sr)
+            {
+                // Skip our own mirrors, including ones from a Detach() whose deferred
+                // Destroy hasn't run yet.
+                bool isMirror = mirrorSet.Contains(sr) ||
+                                (xRaySpriteMaterial != null && sr.sharedMaterial == xRaySpriteMaterial);
+                if (!isMirror)
+                {
+                    AddSprite(sr);
+                }
+            }
+            else if (r is MeshRenderer || r is SkinnedMeshRenderer)
+            {
+                AddMesh(r);
+            }
+        }
+        ApplyXRayColor();
+        SyncSpriteMirrors();
+    }
+
+    private void Detach()
+    {
+        SetTint(false, force: true);
+
+        foreach (MeshEntry m in meshes)
+        {
+            if (m.renderer == null || m.xRayIndex < 0)
+            {
+                continue;
+            }
+            m.renderer.SetPropertyBlock(emptyBlock, m.xRayIndex);
+            List<Material> kept = new(m.renderer.sharedMaterials);
+            kept.RemoveAll(mat => mat == xRayMaterial);
+            m.renderer.sharedMaterials = kept.ToArray();
+        }
+        meshes.Clear();
+
+        foreach (SpriteEntry s in sprites)
+        {
+            if (s.mirror != null)
+            {
+                Destroy(s.mirror.gameObject);
+            }
+        }
+        sprites.Clear();
+        mirrorSet.Clear();
+    }
+
+    // ------------------------------------------------------------------
+    // Mesh renderers
+    // ------------------------------------------------------------------
+
+    private void AddMesh(Renderer r)
+    {
+        Material[] mats = r.sharedMaterials;
+        int existing = xRayMaterial != null ? Array.IndexOf(mats, xRayMaterial) : -1;
+
+        MeshEntry e = new MeshEntry
+        {
+            renderer = r,
+            baseCount = existing >= 0 ? mats.Length - 1 : mats.Length,
+            xRayIndex = -1,
+        };
+
+        if (xRayMaterial != null)
+        {
+            if (existing >= 0)
+            {
+                e.xRayIndex = existing;
+            }
+            else
+            {
+                // A material beyond the submesh count re-renders the last submesh with it.
+                Material[] extended = new Material[mats.Length + 1];
+                mats.CopyTo(extended, 0);
+                extended[mats.Length] = xRayMaterial;
+                r.sharedMaterials = extended;
+                e.xRayIndex = mats.Length;
+            }
+
+            // The x-ray re-renders the last submesh, so take the shape from its material.
+            if (e.baseCount > 0)
+            {
+                TryGetShapeTexture(mats[e.baseCount - 1], out e.shapeTex, out e.shapeSt);
+            }
+        }
+
+        meshes.Add(e);
+    }
+
+    /// <summary>
+    /// Base texture of alpha-tested or transparent materials, so billboards get a shaped
+    /// silhouette. Opaque materials are skipped: their texture alpha often holds other
+    /// data (e.g. smoothness) and would punch holes in the x-ray.
+    /// </summary>
+    private static bool TryGetShapeTexture(Material m, out Texture tex, out Vector4 st)
+    {
+        tex = null;
+        st = new Vector4(1.0f, 1.0f, 0.0f, 0.0f);
+        if (m == null || m.renderQueue < AlphaTestQueue)
+        {
+            return false;
+        }
+
+        string prop = m.HasProperty("_BaseMap") ? "_BaseMap" : m.HasProperty("_MainTex") ? "_MainTex" : null;
+        if (prop == null)
+        {
+            return false;
+        }
+
+        tex = m.GetTexture(prop);
+        if (tex == null)
+        {
+            return false;
+        }
+        Vector2 scale = m.GetTextureScale(prop);
+        Vector2 offset = m.GetTextureOffset(prop);
+        st = new Vector4(scale.x, scale.y, offset.x, offset.y);
+        return true;
+    }
+
+    // ------------------------------------------------------------------
+    // Sprite renderers
+    // ------------------------------------------------------------------
+
+    private void AddSprite(SpriteRenderer source)
+    {
+        SpriteEntry e = new SpriteEntry { source = source, originalColor = source.color };
+
+        if (xRaySpriteMaterial != null)
+        {
+            GameObject go = new GameObject(source.name + " (X-Ray)");
+            go.layer = source.gameObject.layer;
+            go.transform.SetParent(source.transform, false);
+
+            SpriteRenderer mirror = go.AddComponent<SpriteRenderer>();
+            mirror.sharedMaterial = xRaySpriteMaterial;
+            mirror.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+            mirror.receiveShadows = false;
+            e.mirror = mirror;
+            mirrorSet.Add(mirror);
+        }
+
+        sprites.Add(e);
+    }
+
+    private void SyncSpriteMirrors()
+    {
+        foreach (SpriteEntry s in sprites)
+        {
+            if (s.source == null || s.mirror == null)
+            {
+                continue;
+            }
+            SpriteRenderer src = s.source;
+            SpriteRenderer m = s.mirror;
+
+            m.enabled = src.enabled;
+            m.sprite = src.sprite;
+            m.flipX = src.flipX;
+            m.flipY = src.flipY;
+            m.drawMode = src.drawMode;
+            if (src.drawMode != SpriteDrawMode.Simple)
+            {
+                m.size = src.size;
+            }
+            m.sortingLayerID = src.sortingLayerID;
+            m.sortingOrder = src.sortingOrder;
+            m.color = occludedColor;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Colors
+    // ------------------------------------------------------------------
+
+    private void ApplyXRayColor()
+    {
+        foreach (MeshEntry m in meshes)
+        {
+            if (m.renderer == null || m.xRayIndex < 0)
+            {
+                continue;
+            }
+            block.Clear();
+            block.SetColor(XRayColorId, occludedColor);
+            if (m.shapeTex != null)
+            {
+                block.SetTexture(MainTexId, m.shapeTex);
+                block.SetVector(MainTexStId, m.shapeSt);
+            }
+            m.renderer.SetPropertyBlock(block, m.xRayIndex);
+        }
+        // Sprite mirrors take their color in SyncSpriteMirrors.
+    }
+
+    private void SetTint(bool on, bool force)
+    {
+        if (on == tinted && !force)
+        {
+            return;
+        }
+
+        // Alpha only matters for the x-ray; the visible parts stay opaque.
+        Color tint = occludedColor;
+        tint.a = 1.0f;
+
+        // Meshes: per-material blocks on the base materials, so the x-ray slot keeps its own.
+        block.Clear();
+        block.SetColor(BaseColorId, tint);
+        block.SetColor(ColorId, tint);
+        foreach (MeshEntry m in meshes)
+        {
+            if (m.renderer == null)
+            {
+                continue;
+            }
+            for (int i = 0; i < m.baseCount; ++i)
+            {
+                m.renderer.SetPropertyBlock(on ? block : emptyBlock, i);
+            }
+        }
+
+        // Sprites: via SpriteRenderer.color, restoring the color they had before tinting.
+        for (int i = 0; i < sprites.Count; ++i)
+        {
+            SpriteEntry s = sprites[i];
+            if (s.source == null)
+            {
+                continue;
+            }
+            if (on)
+            {
+                if (!tinted)
+                {
+                    s.originalColor = s.source.color;
+                    sprites[i] = s;
+                }
+                Color c = tint;
+                c.a = s.originalColor.a;
+                s.source.color = c;
+            }
+            else if (tinted)
+            {
+                s.source.color = s.originalColor;
+            }
+        }
+
+        tinted = on;
     }
 
     // ------------------------------------------------------------------
@@ -177,7 +461,7 @@ public class PlayerOcclusion : MonoBehaviour
         bool ortho = viewCamera.orthographic;
         int blocked = 0;
 
-        // Rays from inside the player's box toward the camera can meet other boxes' walls
+        // Rays from inside the player's room toward the camera can meet other rooms' walls
         // from behind; with inverted normals those are back faces, which PhysX skips by default.
         bool prevBackfaces = Physics.queriesHitBackfaces;
         Physics.queriesHitBackfaces = true;
@@ -246,16 +530,13 @@ public class PlayerOcclusion : MonoBehaviour
             {
                 cachedOwnBox = null;
             }
+            else if (area.GetComponentInChildren<Renderer>(true) != null || area.transform.parent == null)
+            {
+                cachedOwnBox = area.transform;
+            }
             else
             {
-                if (area.GetComponentInChildren<Renderer>(true) != null || area.transform.parent == null)
-                {
-                    cachedOwnBox = area.transform;
-                }
-                else
-                {
-                    cachedOwnBox = area.transform.parent;
-                }
+                cachedOwnBox = area.transform.parent;
             }
         }
         return cachedOwnBox;
@@ -265,113 +546,32 @@ public class PlayerOcclusion : MonoBehaviour
     {
         bounds = default;
         bool any = false;
-        foreach (Renderer r in renderers)
+
+        foreach (MeshEntry m in meshes)
         {
-            if (r == null || !r.enabled)
-            {
-                continue;
-            }
-            if (!any)
-            {
-                bounds = r.bounds;
-                any = true;
-            }
-            else
-            {
-                bounds.Encapsulate(r.bounds);
-            }
+            Accumulate(m.renderer, ref bounds, ref any);
+        }
+        foreach (SpriteEntry s in sprites)
+        {
+            Accumulate(s.source, ref bounds, ref any);
         }
         return any;
     }
 
-    // ------------------------------------------------------------------
-    // Materials
-    // ------------------------------------------------------------------
-
-    private void AddXRay()
+    private static void Accumulate(Renderer r, ref Bounds bounds, ref bool any)
     {
-        for (int i = 0; i < renderers.Length; ++i)
-        {
-            Material[] mats = renderers[i].sharedMaterials;
-            int existing = xRayMaterial != null ? Array.IndexOf(mats, xRayMaterial) : -1;
-            baseMaterialCounts[i] = existing >= 0 ? mats.Length - 1 : mats.Length;
-            xRayIndices[i] = xRayMaterial == null ? -1 : (existing >= 0 ? existing : mats.Length);
-
-            if (xRayMaterial == null || existing >= 0)
-            {
-                continue;
-            }
-
-            // A material beyond the submesh count re-renders the last submesh with it.
-            Material[] extended = new Material[mats.Length + 1];
-            mats.CopyTo(extended, 0);
-            extended[mats.Length] = xRayMaterial;
-            renderers[i].sharedMaterials = extended;
-        }
-
-        ApplyXRayColor();
-    }
-
-    private void ApplyXRayColor()
-    {
-        xRayBlock.SetColor(XRayColorId, occludedColor);
-        for (int i = 0; i < renderers.Length; ++i)
-        {
-            if (renderers[i] != null && xRayIndices[i] >= 0)
-            {
-                renderers[i].SetPropertyBlock(xRayBlock, xRayIndices[i]);
-            }
-        }
-    }
-
-    private void RemoveXRay()
-    {
-        if (xRayMaterial == null)
+        if (r == null || !r.enabled || !r.gameObject.activeInHierarchy)
         {
             return;
         }
-        for (int i = 0; i < renderers.Length; ++i)
+        if (!any)
         {
-            Renderer r = renderers[i];
-            if (r == null)
-            {
-                continue;
-            }
-            if (xRayIndices[i] >= 0)
-            {
-                r.SetPropertyBlock(emptyBlock, xRayIndices[i]);
-                xRayIndices[i] = -1;
-            }
-            Material[] mats = r.sharedMaterials;
-            if (Array.IndexOf(mats, xRayMaterial) < 0)
-            {
-                continue;
-            }
-            List<Material> kept = new(mats);
-            kept.RemoveAll(m => m == xRayMaterial);
-            r.sharedMaterials = kept.ToArray();
+            bounds = r.bounds;
+            any = true;
         }
-    }
-
-    private void ApplyTint(bool on)
-    {
-        // Alpha is only meaningful for the x-ray; the base color stays opaque.
-        Color tint = occludedColor;
-        tint.a = 1.0f;
-        tintBlock.SetColor(BaseColorId, tint);
-        tintBlock.SetColor(ColorId, tint);
-
-        // Per-material blocks, so the x-ray material keeps its own color.
-        for (int i = 0; i < renderers.Length; ++i)
+        else
         {
-            if (renderers[i] == null)
-            {
-                continue;
-            }
-            for (int m = 0; m < baseMaterialCounts[i]; ++m)
-            {
-                renderers[i].SetPropertyBlock(on ? tintBlock : emptyBlock, m);
-            }
+            bounds.Encapsulate(r.bounds);
         }
     }
 }
